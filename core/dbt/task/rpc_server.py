@@ -1,6 +1,7 @@
 import os
 
 from jsonrpc import Dispatcher, JSONRPCResponseManager
+
 from werkzeug.wrappers import Request, Response
 from werkzeug.serving import run_simple
 
@@ -8,7 +9,6 @@ from dbt.logger import GLOBAL_LOGGER as logger
 from dbt.task.base import ConfiguredTask
 from dbt.task.compile import CompileTask, RemoteCompileTask
 from dbt.task.run import RemoteRunTask
-
 
 
 class RPCServerTask(ConfiguredTask):
@@ -29,7 +29,6 @@ class RPCServerTask(ConfiguredTask):
     @property
     def manifest(self):
         return self.compile_task.manifest
-
 
     def run(self):
         os.chdir(self.config.target_path)

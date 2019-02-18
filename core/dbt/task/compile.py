@@ -1,5 +1,6 @@
 import os
 
+from dbt.adapters.factory import get_adapter
 from dbt.compilation import compile_manifest
 from dbt.loader import load_all_projects
 from dbt.node_runners import CompileRunner
@@ -8,7 +9,7 @@ from dbt.parser.models import ModelParser
 from dbt.parser.util import ParserUtils
 import dbt.ui.printer
 
-from dbt.task.runnable import GraphRunnableTask, RemoteCallable
+from dbt.task.runnable import ManifestTask, GraphRunnableTask, RemoteCallable
 
 
 class CompileTask(GraphRunnableTask):
@@ -39,17 +40,28 @@ class RemoteCompileTask(CompileTask, RemoteCallable):
         self.parser = None
 
     def _runtime_initialize(self):
-        super(CompileTask, self)._runtime_initialize()
+        ManifestTask._runtime_initialize(self)
         self.parser = ModelParser(
             self.config,
             all_projects=load_all_projects(self.config),
             macro_manifest=self.manifest
         )
 
-    def handle_request(self, name, sql):
-        # print('kwargs: {}'.format(kwargs))
+    def runtime_cleanup(self, selected_uids):
+        """Do some pre-run cleanup that is usually performed in Task __init__.
+        """
+        self.run_count = 0
+        self.num_nodes = len(selected_uids)
+        self.node_results = []
+        self._skipped_children = {}
+        self._skipped_children = {}
+        self._raise_next_tick = None
+
+    def handle_request(self, name, sql, timeout=None):
         if self.manifest is None:
             self._runtime_initialize()
+
+        sql = self.decode_sql(sql)
         request_path = os.path.join(self.config.target_path, 'rpc', name)
         node_dict = {
             'name': name,
@@ -60,12 +72,18 @@ class RemoteCompileTask(CompileTask, RemoteCallable):
             'package_name': self.config.project_name,
             'raw_sql': sql,
         }
-        #add_new_refs
         unique_id, node = self.parser.parse_sql_node(node_dict)
-        # build a new graph!
-        manifest = ParserUtils.add_new_refs(self.manifest, self.config,
-                                                 node)
-        linker = compile_manifest(self.config, manifest)
 
-        result = self.get_runner(node).safe_run(manifest)
+        # build a new graph + job queue
+        manifest = ParserUtils.add_new_refs(self.manifest, self.config, node)
+        linker = compile_manifest(self.config, manifest)
+        selected_uids = [node.unique_id]
+        self.runtime_cleanup(selected_uids)
+        self.job_queue = linker.as_graph_queue(manifest, selected_uids)
+
+        # TODO: how can we get a timeout in here? timeouts + threads = sadness!
+        result = self.execute_with_hooks(selected_uids)
+
+        # remove the unique ID we added in the run
+        del self.manifest.nodes[unique_id]
         return result.serialize()

@@ -194,7 +194,8 @@ class ParserUtils(object):
     @classmethod
     def add_new_refs(cls, manifest, current_project, node):
         """Given a new node that is not in the manifest, copy the manifest and
-        insert the new node into it as if it were part of regular ref processing
+        insert the new node into it as if it were part of regular ref
+        processing
         """
         manifest = manifest.deepcopy(config=current_project)
         if node.unique_id in manifest.nodes:

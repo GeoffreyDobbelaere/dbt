@@ -1,3 +1,4 @@
+import base64
 import os
 import time
 from abc import abstractmethod
@@ -8,7 +9,7 @@ import six
 from dbt.task.base import ConfiguredTask
 from dbt.adapters.factory import get_adapter
 from dbt.logger import GLOBAL_LOGGER as logger
-from dbt.compat import abstractclassmethod
+from dbt.compat import abstractclassmethod, to_unicode
 from dbt.compilation import compile_manifest
 from dbt.contracts.graph.manifest import CompileResultNode
 from dbt.contracts.results import ExecutionResult
@@ -243,21 +244,8 @@ class GraphRunnableTask(ManifestTask):
     def after_hooks(self, adapter, results, elapsed):
         pass
 
-    def run(self):
-        """
-        Run dbt for the query, based on the graph.
-        """
-        self._runtime_initialize()
+    def execute_with_hooks(self, selected_uids):
         adapter = get_adapter(self.config)
-
-        if len(self._flattened_nodes) == 0:
-            logger.info("WARNING: Nothing to do. Try checking your model "
-                        "configs and model specification args")
-            return []
-        else:
-            logger.info("")
-
-        selected_uids = frozenset(n.unique_id for n in self._flattened_nodes)
         try:
             self.before_hooks(adapter)
             started = time.time()
@@ -275,10 +263,28 @@ class GraphRunnableTask(ManifestTask):
             elapsed_time=elapsed,
             generated_at=dbt.utils.timestring()
         )
+        return result
+
+    def run(self):
+        """
+        Run dbt for the query, based on the graph.
+        """
+        self._runtime_initialize()
+
+        if len(self._flattened_nodes) == 0:
+            logger.info("WARNING: Nothing to do. Try checking your model "
+                        "configs and model specification args")
+            return []
+        else:
+            logger.info("")
+
+        selected_uids = frozenset(n.unique_id for n in self._flattened_nodes)
+        result = self.execute_with_hooks(selected_uids)
+
         result.write(self.result_path())
 
-        self.task_end_messages(res)
-        return res
+        self.task_end_messages(result.results)
+        return result.results
 
     def interpret_results(self, results):
         if results is None:
@@ -328,14 +334,15 @@ class GraphRunnableTask(ManifestTask):
         dbt.ui.printer.print_run_end_messages(results)
 
 
-
 class RemoteCallable(object):
     METHOD_NAME = None
     is_async = False
 
     @abstractmethod
     def handle_request(self, **kwargs):
-        raise dbt.exceptions.NotImplementedException('from_kwargs not implemented')
+        raise dbt.exceptions.NotImplementedException(
+            'from_kwargs not implemented'
+        )
 
     def safe_handle_request(self, **kwargs):
         try:
@@ -343,3 +350,21 @@ class RemoteCallable(object):
         except dbt.exceptions.RuntimeException as exc:
             # we have to convert this to a string for RPC responses
             raise dbt.exceptions.RPCException(str(exc))
+
+    def decode_sql(self, sql):
+        """Base64 decode a string. This should only be used for sql in calls.
+
+        :param str sql: The base64 encoded form of the original utf-8 string
+        :return str: The decoded utf-8 string
+        """
+        # JSON is defined as using "unicode", we'll go a step further and
+        # mandate utf-8 (though for the base64 part, it doesn't really matter!)
+        base64_sql_bytes = to_unicode(sql).encode('utf-8')
+        try:
+            sql_bytes = base64.b64decode(base64_sql_bytes, validate=True)
+        except ValueError as exc:
+            raise dbt.exceptions.RPCException(
+                'invalid base64-encoded sql input: {!s}'.format(exc)
+            )
+
+        return sql_bytes.decode('utf-8')

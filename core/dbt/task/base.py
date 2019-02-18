@@ -32,7 +32,6 @@ def read_profiles(profiles_dir=None):
     return profiles
 
 
-
 PROFILES_HELP_MESSAGE = """
 For more information on configuring profiles, please consult the dbt docs:
 
@@ -43,6 +42,7 @@ https://docs.getdbt.com/docs/configure-your-profile
 @six.add_metaclass(ABCMeta)
 class BaseTask(object):
     ConfigType = NoneConfig
+
     def __init__(self, args, config):
         self.args = args
         self.config = config
