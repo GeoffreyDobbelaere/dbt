@@ -125,34 +125,38 @@ class ParserUtils(object):
         return column
 
     @classmethod
-    def process_docs(cls, manifest, current_project):
-        for _, node in manifest.nodes.items():
-            target_doc = None
-            target_doc_name = None
-            target_doc_package = None
-            for docref in node.get('docrefs', []):
-                column_name = docref.get('column_name')
-                if column_name is None:
-                    description = node.get('description', '')
-                else:
-                    column = cls._get_node_column(node, column_name)
-                    description = column.get('description', '')
-                target_doc_name = docref['documentation_name']
-                target_doc_package = docref['documentation_package']
-                context = {
-                    'doc': docs(node, manifest, current_project, column_name),
-                }
+    def process_docs_for_node(cls, manifest, current_project, node):
+        target_doc = None
+        target_doc_name = None
+        target_doc_package = None
+        for docref in node.get('docrefs', []):
+            column_name = docref.get('column_name')
+            if column_name is None:
+                description = node.get('description', '')
+            else:
+                column = cls._get_node_column(node, column_name)
+                description = column.get('description', '')
+            target_doc_name = docref['documentation_name']
+            target_doc_package = docref['documentation_package']
+            context = {
+                'doc': docs(node, manifest, current_project, column_name),
+            }
 
-                # At this point, target_doc is a ParsedDocumentation, and we
-                # know that our documentation string has a 'docs("...")'
-                # pointing at it. We want to render it.
-                description = dbt.clients.jinja.get_rendered(description,
-                                                             context)
-                # now put it back.
-                if column_name is None:
-                    node.set('description', description)
-                else:
-                    column['description'] = description
+            # At this point, target_doc is a ParsedDocumentation, and we
+            # know that our documentation string has a 'docs("...")'
+            # pointing at it. We want to render it.
+            description = dbt.clients.jinja.get_rendered(description,
+                                                         context)
+            # now put it back.
+            if column_name is None:
+                node.set('description', description)
+            else:
+                column['description'] = description
+
+    @classmethod
+    def process_docs(cls, manifest, current_project):
+        for node in manifest.nodes.values():
+            cls.process_docs_for_node(manifest, current_project, node)
         return manifest
 
     @classmethod
@@ -192,6 +196,41 @@ class ParserUtils(object):
             manifest.nodes[node['unique_id']] = node
 
     @classmethod
+    def process_refs(cls, manifest, current_project):
+        for node in manifest.nodes.values():
+            cls.process_refs_for_node(manifest, current_project, node)
+        return manifest
+
+    @classmethod
+    def process_sources_for_node(cls, manifest, current_project, node):
+        target_source = None
+        for source_name, table_name in node.sources:
+            target_source = cls.resolve_source(
+                manifest,
+                source_name,
+                table_name,
+                current_project,
+                node.get('package_name'))
+
+            if target_source is None:
+                # this folows the same pattern as refs
+                node.config['enabled'] = False
+                dbt.utils.invalid_source_fail_unless_test(
+                    node,
+                    source_name,
+                    table_name)
+                continue
+            target_source_id = target_source.unique_id
+            node.depends_on['nodes'].append(target_source_id)
+            manifest.nodes[node['unique_id']] = node
+
+    @classmethod
+    def process_sources(cls, manifest, current_project):
+        for node in manifest.nodes.values():
+            cls.process_sources_for_node(manifest, current_project, node)
+        return manifest
+
+    @classmethod
     def add_new_refs(cls, manifest, current_project, node):
         """Given a new node that is not in the manifest, copy the manifest and
         insert the new node into it as if it were part of regular ref
@@ -201,36 +240,7 @@ class ParserUtils(object):
         if node.unique_id in manifest.nodes:
             raise ValueError('todo: real error')
         manifest.nodes[node.unique_id] = node
+        cls.process_sources_for_node(manifest, current_project, node)
         cls.process_refs_for_node(manifest, current_project, node)
-        return manifest
-
-    @classmethod
-    def process_refs(cls, manifest, current_project):
-        for node in manifest.nodes.values():
-            cls.process_refs_for_node(manifest, current_project, node)
-        return manifest
-
-    @classmethod
-    def process_sources(cls, manifest, current_project):
-        for _, node in manifest.nodes.items():
-            target_source = None
-            for source_name, table_name in node.sources:
-                target_source = cls.resolve_source(
-                    manifest,
-                    source_name,
-                    table_name,
-                    current_project,
-                    node.get('package_name'))
-
-                if target_source is None:
-                    # this folows the same pattern as refs
-                    node.config['enabled'] = False
-                    dbt.utils.invalid_source_fail_unless_test(
-                        node,
-                        source_name,
-                        table_name)
-                    continue
-                target_source_id = target_source.unique_id
-                node.depends_on['nodes'].append(target_source_id)
-                manifest.nodes[node['unique_id']] = node
+        cls.process_docs_for_node(manifest, current_project, node)
         return manifest
