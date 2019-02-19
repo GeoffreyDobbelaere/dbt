@@ -348,8 +348,14 @@ class RemoteCallable(object):
         try:
             return self.handle_request(**kwargs)
         except dbt.exceptions.RuntimeException as exc:
+            logger.debug('dbt runtime exception',
+                         exc_info=True)
             # we have to convert this to a string for RPC responses
             raise dbt.exceptions.RPCException(str(exc))
+        except Exception as exc:
+            logger.debug('uncaught python exception',
+                         exc_info=True)
+            raise
 
     def decode_sql(self, sql):
         """Base64 decode a string. This should only be used for sql in calls.

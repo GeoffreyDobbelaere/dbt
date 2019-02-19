@@ -1,3 +1,4 @@
+import json
 import os
 
 from jsonrpc import Dispatcher, JSONRPCResponseManager
@@ -9,6 +10,7 @@ from dbt.logger import GLOBAL_LOGGER as logger
 from dbt.task.base import ConfiguredTask
 from dbt.task.compile import CompileTask, RemoteCompileTask
 from dbt.task.run import RemoteRunTask
+from dbt.utils import JSONEncoder
 
 
 class RPCServerTask(ConfiguredTask):
@@ -62,4 +64,5 @@ class RPCServerTask(ConfiguredTask):
         response = JSONRPCResponseManager.handle(
             request.data, self.dispatcher
         )
-        return Response(response.json, mimetype='application/json')
+        json_data = json.dumps(response.data, cls=JSONEncoder)
+        return Response(json_data, mimetype='application/json')

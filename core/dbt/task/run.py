@@ -2,7 +2,7 @@ from __future__ import print_function
 
 from dbt.logger import GLOBAL_LOGGER as logger
 from dbt.node_types import NodeType, RunHookType
-from dbt.node_runners import ModelRunner
+from dbt.node_runners import ModelRunner, RPCExecuteRunner
 
 import dbt.exceptions
 import dbt.flags
@@ -118,3 +118,6 @@ class RunTask(CompileTask):
 
 class RemoteRunTask(RemoteCompileTask, RunTask):
     METHOD_NAME = 'runNode'
+
+    def get_runner_type(self):
+        return RPCExecuteRunner
